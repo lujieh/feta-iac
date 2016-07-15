@@ -1,0 +1,278 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters" : {
+	"InstanceType" : {
+	    "Description" : "The type of ec2 instances to use to power the cluster",
+	    "Type" : "String",
+	    "AllowedValues" : [
+		"t2.nano",
+		"t2.micro",
+		"t2.small",
+		"t2.medium",
+		"t2.large",
+		"m4.large",
+		"m4.xlarge",
+		"m4.2xlarge",
+		"m3.medium",
+		"m3.large",
+		"m3.xlarge",
+		"m3.2xlarge"
+	    ],
+	    "ConstraintDescription" : "Must be a valid EC2 instance type",
+	    "Default" : "t2.small"
+	},
+	"DeploymentSubnets" : {
+	    "Description" : "A comma delimited list of subnets for the cluster to run in.",
+	    "Type" : "List<AWS::EC2::Subnet::Id>",
+	    "Default" : ""
+	},
+	"EfsMountTargetSubnets" : {
+	    "Description" : "A comma delimited list of subnets for the EFS mount targets.",
+	    "Type" : "List<AWS::EC2::Subnet::Id>",
+	    "Default" : ""
+	},
+	"DeploymentVPC" : {
+	    "Description" : "The vpc id to deploy the cluster to.",
+	    "Type" : "AWS::EC2::VPC::Id",
+	    "Default" : ""
+	},
+	"DeploymentVPCCidr" : {
+	    "Description" : "The vpc id to deploy the cluster to.",
+	    "Type" : "String",
+	    "Default" : "10.212.96.0/19"
+	},
+	"KeyName" : {
+	    "Description" : "The ssh key to assign to the nodes in the cluster.",
+	    "Type" : "AWS::EC2::KeyPair::KeyName",
+	    "Default" : "sherwin-ec2"
+	}
+    },
+    "Resources" : {
+	"EfsFileSystem"{
+	    "Type" : "AWS::EFS::FileSystem",
+	    "Properties" : {
+		"FileSystemTags" : [
+		    {
+			"Name" : "Name",
+			"Value" : "Prod Drupal Files"
+		    }
+		]
+	    }
+	},
+	"EfsMountTargetSecurityGroup" : {
+	    "Type" : "AWS::EC2::SecurityGroup",
+	    "Properties" : {
+		"GroupDescription" : "The security group used for the prod drupal efs mount targets",
+		"VpcId" : { "Ref" : "DeploymentVPC" }
+	    }
+	},
+	"EfsMountTargetSecurityGroupIngress" : {
+	    "Type" : "AWS::EC2::SecurityGroupIngress",
+	    "Properties" : {
+		"GroupId" : { "Ref" : "EfsMountTargetSecurityGroup" },
+		"IpProtocol" : "tcp",
+		"FromPort" : 2049,
+		"ToPort" : 2049,
+		"CidrIp" : { "Ref" : "DeploymentVPCCidr" },
+	    }
+	},
+	"EfsMountAvailA"{
+	    "Type" : "AWS::EFS::MountTarget",
+	    "Properties" : {
+		"FileSystemId" : { "Ref" : "EfsFileSystem" }
+		"SecurityGroups" : [
+		    { "Ref" : "EfsMountTargetSecurityGroup" }
+		]
+		"SubnetId" : { "Fn::Select" [ "0", { "Ref" : "EfsMountTargetSubnets" }]}
+	    }
+	},
+	"EfsMountAvailB"{
+	    "Type" : "AWS::EFS::MountTarget",
+	    "Properties" : {
+		"FileSystemId" : { "Ref" : "EfsFileSystem" }
+		"SecurityGroups" : [
+		    { "Ref" : "EfsMountTargetSecurityGroup" }
+		]
+		"SubnetId" : { "Fn::Select" [ "1", { "Ref" : "EfsMountTargetSubnets" }]}
+	    }
+	},
+	"EcsSecurityGroup" : {
+	    "Type" : "AWS::EC2::SecurityGroup",
+	    "Properties" : {
+		"GroupDescription" : "The security group used for nodes of the ecs cluster",
+		"VpcId" : { "Ref" : "DeploymentVPC" }
+	    }
+	},
+	"EcsSecurityGroupIngress" : {
+	    "Type" : "AWS::EC2::SecurityGroupIngress",
+	    "Properties" : {
+		"GroupId" : { "Ref" : "EcsSecurityGroup" },
+		"IpProtocol" : "-1",
+		"SourceSecurityGroupId" : { "Ref" : "EcsSecurityGroup" }
+	    }
+	},
+	"EcsIamRole" : {
+	    "Type" : "AWS::IAM::Role",
+	    "Properties" : {
+		"AssumeRolePolicyDocument" : {
+		    "Version" : "2012-10-17",
+		    "Statement": [
+			{
+			    "Effect": "Allow",
+			    "Principal": {
+				"Service": [ "ec2.amazonaws.com" ]
+			    },
+			    "Action": [ "sts:AssumeRole" ]
+			}
+		    ]
+		},
+		"ManagedPolicyArns" : [
+		    "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+		]
+	    }
+	},
+	"EcsInstanceProfile" : {
+	    "Type" : "AWS::IAM::InstanceProfile",
+	    "Properties" : {
+		"Path" : "/",
+		"Roles" : [
+		    { "Ref" : "EcsIamRole" }
+		]
+	    }
+	},
+	"EcsLaunchConfiguration" : {
+	    "Type" : "AWS::AutoScaling::LaunchConfiguration",
+	    "Properties" : {
+		"AssociatePublicIpAddress" : false,
+		"BlockDeviceMappings" : [
+		    {
+			"DeviceName" : "/dev/xvda",
+			"Ebs" : {
+			    "VolumeSize" : 8,
+			    "VolumeType" : "gp2",
+			    "DeleteOnTermination" : true
+			}
+		    },
+		    {
+			"DeviceName" : "/dev/xvdcz",
+			"Ebs" : {
+			    "VolumeSize" : 22,
+			    "VolumeType" : "gp2",
+			    "DeleteOnTermination" : true
+			}
+		    }
+		],
+		"IamInstanceProfile" : { "Ref" : "EcsInstanceProfile" },
+		"ImageId" : "ami-c7a451a7",
+		"InstanceMonitoring" : false,
+		"InstanceType" : { "Ref" : "InstanceType" },
+		"SecurityGroups" : [
+		    { "Ref" : "EcsSecurityGroup" }
+		],
+		"UserData" : { "Fn::Base64" : { "Fn::Join" : [ "", [
+		    "#cloud-config
+		    package_upgrade: true
+		    packages:
+		    - nfs-utils
+		    runcmd:
+		    - echo \"$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone).",
+		    { "Ref" : "EfsFileSystem" },
+		    ".efs.us-west-2.amazonaws.com:/    /opt/drupal-file-share   nfs4    defaults\" >> /etc/fstab
+		    - mkdir /opt/drupal-file-share
+		    - mount -a
+		    - echo ECS_CLUSTER=",
+		    { "Ref" : "EcsCluster" },
+		    " >> /etc/ecs/ecs.config",
+		    ""
+		]]}},
+		"KeyName" : { "Ref" : "KeyName" }
+	    }
+	},
+	"EcsAutoScalingGroup" : {
+	    "Type" : "AWS::AutoScaling::AutoScalingGroup",
+	    "Properties" : {
+		"Cooldown" : "300",
+		"DesiredCapacity" : "2",
+		"HealthCheckGracePeriod" : 300,
+		"HealthCheckType" : "EC2",
+		"LaunchConfigurationName" : { "Ref" : "EcsLaunchConfiguration"},
+		"MaxSize" : "5",
+		"MinSize" : "2",
+		"Tags" : [
+		    {
+			"Key" : "Product",
+			"Value" : "ECS Cluster",
+			"PropagateAtLaunch" : true
+		    },
+		    {
+			"Key" : "env",
+			"Value" : "dev",
+			"PropagateAtLaunch" : true
+		    }
+		],
+		"VPCZoneIdentifier" : { "Ref" : "DeploymentSubnets" }
+	    }
+	},
+	"EcsAutoScalingPolicyUp" : {
+	    "Type" : "AWS::AutoScaling::ScalingPolicy",
+	    "Properties" : {
+		"AdjustmentType" : "ChangeInCapacity",
+		"AutoScalingGroupName" : { "Ref" : "EcsAutoScalingGroup" },
+		"ScalingAdjustment" : 1
+	    }
+	},
+	"EcsAutoScalingPolicyDown" : {
+	    "Type" : "AWS::AutoScaling::ScalingPolicy",
+	    "Properties" : {
+		"AdjustmentType" : "ChangeInCapacity",
+		"AutoScalingGroupName" : { "Ref" : "EcsAutoScalingGroup" },
+		"ScalingAdjustment" : -1
+	    }
+	},
+	"EcsCloudWatchAlarmCPUCreditUsageJump" : {
+	    "Type" : "AWS::CloudWatch::Alarm",
+	    "Properties" : {
+		"AlarmActions" : [ { "Ref" : "EcsAutoScalingPolicyUp" } ],
+		"AlarmDescription" : "This alarm alerts when CPU Credit usage jumps.",
+		"ComparisonOperator" : "GreaterThanOrEqualToThreshold",
+		"Dimensions" : [
+		    {
+			"Name" : "EcsAutoScalingGroup",
+			"Value" : { "Ref" : "EcsAutoScalingGroup" }
+		    }
+		],
+		"EvaluationPeriods" : "1",
+		"MetricName" : "CPUCreditUsage",
+		"Namespace" : "AWS/EC2",
+		"Period" : "300",
+		"Statistic" : "Average",
+		"Threshold" : "0.6",
+		"Unit" : "Count"
+	    }
+	},
+	"EcsCloudWatchAlarmCPUCreditUsageDrop" : {
+	    "Type" : "AWS::CloudWatch::Alarm",
+	    "Properties" : {
+		"AlarmActions" : [ { "Ref" : "EcsAutoScalingPolicyDown" } ],
+		"AlarmDescription" : "This alarm alerts when CPU Credit usage drops.",
+		"ComparisonOperator" : "LessThanOrEqualToThreshold",
+		"Dimensions" : [
+		    {
+			"Name" : "EcsAutoScalingGroup",
+			"Value" : { "Ref" : "EcsAutoScalingGroup" }
+		    }
+		],
+		"EvaluationPeriods" : "1",
+		"MetricName" : "CPUCreditUsage",
+		"Namespace" : "AWS/EC2",
+		"Period" : "300",
+		"Statistic" : "Average",
+		"Threshold" : "0.3",
+		"Unit" : "Count"
+	    }
+	},
+	"EcsCluster" : {
+	    "Type" : "AWS::ECS::Cluster"
+	}
+    }
+}
