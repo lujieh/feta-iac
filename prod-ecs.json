@@ -48,7 +48,7 @@
 	}
     },
     "Resources" : {
-	"EfsFileSystem"{
+	"EfsFileSystem" : {
 	    "Type" : "AWS::EFS::FileSystem",
 	    "Properties" : {
 		"FileSystemTags" : [
@@ -73,27 +73,27 @@
 		"IpProtocol" : "tcp",
 		"FromPort" : 2049,
 		"ToPort" : 2049,
-		"CidrIp" : { "Ref" : "DeploymentVPCCidr" },
+		"CidrIp" : { "Ref" : "DeploymentVPCCidr" }
 	    }
 	},
-	"EfsMountAvailA"{
+	"EfsMountAvailA" : {
 	    "Type" : "AWS::EFS::MountTarget",
 	    "Properties" : {
-		"FileSystemId" : { "Ref" : "EfsFileSystem" }
+		"FileSystemId" : { "Ref" : "EfsFileSystem" },
 		"SecurityGroups" : [
 		    { "Ref" : "EfsMountTargetSecurityGroup" }
-		]
-		"SubnetId" : { "Fn::Select" [ "0", { "Ref" : "EfsMountTargetSubnets" }]}
+		],
+		"SubnetId" : { "Fn::Select" : [ "0", { "Ref" : "EfsMountTargetSubnets" }]}
 	    }
 	},
-	"EfsMountAvailB"{
+	"EfsMountAvailB" : {
 	    "Type" : "AWS::EFS::MountTarget",
 	    "Properties" : {
-		"FileSystemId" : { "Ref" : "EfsFileSystem" }
+		"FileSystemId" : { "Ref" : "EfsFileSystem" },
 		"SecurityGroups" : [
 		    { "Ref" : "EfsMountTargetSecurityGroup" }
-		]
-		"SubnetId" : { "Fn::Select" [ "1", { "Ref" : "EfsMountTargetSubnets" }]}
+		],
+		"SubnetId" : { "Fn::Select" : [ "1", { "Ref" : "EfsMountTargetSubnets" }]}
 	    }
 	},
 	"EcsSecurityGroup" : {
@@ -170,19 +170,19 @@
 		    { "Ref" : "EcsSecurityGroup" }
 		],
 		"UserData" : { "Fn::Base64" : { "Fn::Join" : [ "", [
-		    "#cloud-config
-		    package_upgrade: true
-		    packages:
-		    - nfs-utils
-		    runcmd:
-		    - echo \"$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone).",
+		    "#cloud-config\n",
+		    "package_upgrade: true\n",
+		    "packages:\n",
+		    "- nfs-utils\n",
+		    "runcmd:\n",
+		    "- echo \"$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone).",
 		    { "Ref" : "EfsFileSystem" },
-		    ".efs.us-west-2.amazonaws.com:/    /opt/drupal-file-share   nfs4    defaults\" >> /etc/fstab
-		    - mkdir /opt/drupal-file-share
-		    - mount -a
-		    - echo ECS_CLUSTER=",
+		    ".efs.us-west-2.amazonaws.com:/    /opt/drupal-file-share   nfs4    defaults\" >> /etc/fstab\n",
+		    "- mkdir /opt/drupal-file-share\n",
+		    "- mount -a\n",
+		    "- echo ECS_CLUSTER=",
 		    { "Ref" : "EcsCluster" },
-		    " >> /etc/ecs/ecs.config",
+		    " >> /etc/ecs/ecs.config\n",
 		    ""
 		]]}},
 		"KeyName" : { "Ref" : "KeyName" }
